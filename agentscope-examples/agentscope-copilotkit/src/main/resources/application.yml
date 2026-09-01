@@ -29,6 +29,20 @@ spring:
   http:
     codecs:
       max-in-memory-size: 1MB
+  datasource:
+    url: jdbc:sqlite:agentscope-copilotkit.db
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: create-only
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  sql:
+    init:
+      mode: never
 # AG-UI Configuration
 agentscope:
   agui:

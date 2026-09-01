@@ -26,10 +26,10 @@ import io.agentscope.core.util.JsonUtils;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.ThreadInfo;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.ThreadMutationRequest;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.ThreadsResponse;
+import io.agentscope.examples.copilotkit.repository.AgentSessionRepository;
 import io.agentscope.spring.boot.agui.common.ThreadSessionManager;
 import io.agentscope.spring.boot.agui.common.ThreadSessionManager.ThreadSession;
 import java.time.ZoneOffset;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -48,7 +48,9 @@ public final class DemoThreadStore {
 
     public static final String DEFAULT_AGENT_ID = "default";
 
-    /** Demo identity; matches {@code AgentConfiguration} when {@code X-Token} is absent. */
+    /**
+     * Demo identity; matches {@code AgentConfiguration} when {@code X-Token} is absent.
+     */
     public static final String DEMO_USER_ID = "user-001";
 
     private static final TypeReference<Map<String, Object>> AGUI_EVENT_JSON =
@@ -58,16 +60,19 @@ public final class DemoThreadStore {
     private final AguiAgentRegistry agentRegistry;
     private final InMemoryAgentEventStore eventStore;
     private final AgentEventAguiReplayer eventReplayer;
+    private final AgentSessionRepository agentSessionRepository;
 
     public DemoThreadStore(
             ThreadSessionManager sessionManager,
             AguiAgentRegistry agentRegistry,
             InMemoryAgentEventStore eventStore,
-            AgentEventAguiReplayer eventReplayer) {
+            AgentEventAguiReplayer eventReplayer,
+            AgentSessionRepository agentSessionRepository) {
         this.sessionManager = sessionManager;
         this.agentRegistry = agentRegistry;
         this.eventStore = eventStore;
         this.eventReplayer = eventReplayer;
+        this.agentSessionRepository = agentSessionRepository;
     }
 
     public ThreadsResponse list(
@@ -76,17 +81,20 @@ public final class DemoThreadStore {
         int pageSize = limit == null || limit <= 0 ? Integer.MAX_VALUE : limit;
 
         List<ThreadInfo> all =
-                sessionManager.getSessions().entrySet().stream()
-                        .filter(entry -> DEMO_USER_ID.equals(entry.getValue().getUserId()))
-                        .filter(entry -> agentId.equals(entry.getValue().getAgentId()))
-                        .filter(entry -> includeArchived || !entry.getValue().isArchived())
+                agentSessionRepository
+                        .queryAllByUserIdEqualsOrderByCreatedAtDesc(DEMO_USER_ID)
+                        .stream()
                         .map(
-                                entry ->
-                                        toThreadInfo(
-                                                entry.getValue().getThreadId(), entry.getValue()))
-                        .sorted(Comparator.comparing(ThreadInfo::lastRunAt).reversed())
+                                agentSession ->
+                                        new ThreadInfo(
+                                                agentSession.getThreadId(),
+                                                agentSession.getName(),
+                                                agentSession.getAgentId(),
+                                                agentSession.isArchived(),
+                                                "",
+                                                "",
+                                                ""))
                         .toList();
-
         List<ThreadInfo> page = all.stream().skip(offset).limit(pageSize).toList();
         int nextOffset = offset + page.size();
         String nextCursor = nextOffset < all.size() ? String.valueOf(nextOffset) : null;

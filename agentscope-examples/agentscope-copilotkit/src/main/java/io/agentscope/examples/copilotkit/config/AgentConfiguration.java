@@ -40,6 +40,9 @@ import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.util.JacksonJsonCodec;
 import io.agentscope.core.util.JsonUtils;
 import io.agentscope.examples.copilotkit.a2ui.A2uiComposer;
+import io.agentscope.examples.copilotkit.middleware.AgentEventPersistenceMiddleware;
+import io.agentscope.examples.copilotkit.repository.AgentMessageRepository;
+import io.agentscope.examples.copilotkit.repository.AgentSessionRepository;
 import io.agentscope.examples.copilotkit.service.DemoThreadStore;
 import io.agentscope.examples.copilotkit.service.InMemoryAgentEventStore;
 import io.agentscope.examples.copilotkit.service.PersistingAgentEventEnricher;
@@ -80,11 +83,18 @@ public class AgentConfiguration {
 
     private final WorkbenchStateRegistry workbenchStateRegistry;
     private final A2uiComposer a2uiComposer;
+    private final AgentMessageRepository agentMessageRepository;
+    private final AgentSessionRepository agentSessionRepository;
 
     public AgentConfiguration(
-            WorkbenchStateRegistry workbenchStateRegistry, A2uiComposer a2uiComposer) {
+            WorkbenchStateRegistry workbenchStateRegistry,
+            A2uiComposer a2uiComposer,
+            AgentMessageRepository agentMessageRepository,
+            AgentSessionRepository agentSessionRepository) {
         this.workbenchStateRegistry = workbenchStateRegistry;
         this.a2uiComposer = a2uiComposer;
+        this.agentMessageRepository = agentMessageRepository;
+        this.agentSessionRepository = agentSessionRepository;
     }
 
     @Bean
@@ -201,6 +211,9 @@ public class AgentConfiguration {
                 .enableTaskList()
                 .permissionContext(workbenchPermissionContext())
                 .middleware(new WorkbenchEventMiddleware(workbenchStateRegistry))
+                .middleware(
+                        new AgentEventPersistenceMiddleware(
+                                agentMessageRepository, agentSessionRepository))
                 .maxIters(16)
                 .build();
     }

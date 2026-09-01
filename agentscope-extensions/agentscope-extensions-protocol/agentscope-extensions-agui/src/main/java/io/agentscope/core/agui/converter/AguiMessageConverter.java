@@ -47,6 +47,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.Source;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
@@ -55,6 +56,7 @@ import io.agentscope.core.message.VideoBlock;
 import io.agentscope.core.util.JsonException;
 import io.agentscope.core.util.JsonUtils;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -70,10 +72,14 @@ import java.util.stream.Collectors;
  */
 public class AguiMessageConverter {
 
-    /** AG-UI resume payload key: user approved the tool call. */
+    /**
+     * AG-UI resume payload key: user approved the tool call.
+     */
     private static final String RESUME_PAYLOAD_APPROVED = "approved";
 
-    /** AG-UI resume payload key: full replacement tool arguments. */
+    /**
+     * AG-UI resume payload key: full replacement tool arguments.
+     */
     private static final String RESUME_PAYLOAD_EDITED_ARGS = "editedArgs";
 
     /**
@@ -125,9 +131,10 @@ public class AguiMessageConverter {
      * @param msg The AgentScope message to convert
      * @return The converted AG-UI message
      */
-    public AguiMessage toAguiMessage(Msg msg) {
+    public List<AguiMessage> toAguiMessage(Msg msg) {
         String role = convertRole(msg.getRole());
         StringBuilder content = new StringBuilder();
+        StringBuilder thinkingContent = new StringBuilder();
         List<AguiToolCall> toolCalls = new ArrayList<>();
         String toolCallId = null;
 
@@ -150,15 +157,38 @@ public class AguiMessageConverter {
                         content.append(tb.getText());
                     }
                 }
+            } else if (block instanceof ThinkingBlock tkb) {
+                if (thinkingContent.length() > 0) {
+                    thinkingContent.append("\n");
+                }
+                thinkingContent.append(tkb.getThinking());
             }
         }
+        if (!thinkingContent.isEmpty()) {
+            return List.of(
+                    new AguiMessage(
+                            msg.getId() + "_reasoning",
+                            "reasoning",
+                            !thinkingContent.isEmpty()
+                                    ? new MessageContent.Text(thinkingContent.toString())
+                                    : null,
+                            toolCalls.isEmpty() ? null : toolCalls,
+                            toolCallId),
+                    new AguiMessage(
+                            msg.getId(),
+                            role,
+                            !content.isEmpty() ? new MessageContent.Text(content.toString()) : null,
+                            toolCalls.isEmpty() ? null : toolCalls,
+                            toolCallId));
+        }
 
-        return new AguiMessage(
-                msg.getId(),
-                role,
-                content.length() > 0 ? new MessageContent.Text(content.toString()) : null,
-                toolCalls.isEmpty() ? null : toolCalls,
-                toolCallId);
+        return List.of(
+                new AguiMessage(
+                        msg.getId(),
+                        role,
+                        !content.isEmpty() ? new MessageContent.Text(content.toString()) : null,
+                        toolCalls.isEmpty() ? null : toolCalls,
+                        toolCallId));
     }
 
     /**
@@ -185,7 +215,7 @@ public class AguiMessageConverter {
      * Convert an AG-UI run input to AgentScope messages, resolving resume entries through known
      * originating interrupts when available.
      *
-     * @param input The AG-UI run input
+     * @param input            The AG-UI run input
      * @param resumeInterrupts Mapping from interrupt ID to the originating interrupt
      * @return The converted AgentScope messages
      */
@@ -217,7 +247,10 @@ public class AguiMessageConverter {
      * @return The converted AG-UI messages
      */
     public List<AguiMessage> toAguiMessageList(List<Msg> msgs) {
-        return msgs.stream().map(this::toAguiMessage).collect(Collectors.toList());
+        return msgs.stream()
+                .map(this::toAguiMessage)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -254,8 +287,8 @@ public class AguiMessageConverter {
     /**
      * Add a text content block for the given text, wrapping in a ToolResultBlock for tool messages.
      *
-     * @param blocks the target block list
-     * @param text the text content
+     * @param blocks      the target block list
+     * @param text        the text content
      * @param aguiMessage the source message (for role/tool-call-id context)
      */
     private void addTextBlock(List<ContentBlock> blocks, String text, AguiMessage aguiMessage) {
@@ -407,9 +440,9 @@ public class AguiMessageConverter {
      * non-null, avoiding the {@code "argument content is null"} bug in
      * {@code ReActAgent.applyConfirmResults}.
      *
-     * @param resume the AG-UI resume entry
+     * @param resume     the AG-UI resume entry
      * @param toolCallId the resolved tool call ID
-     * @param interrupt the originating interrupt containing tool metadata
+     * @param interrupt  the originating interrupt containing tool metadata
      * @return a USER-role Msg with the confirmation result
      */
     @SuppressWarnings("unchecked")

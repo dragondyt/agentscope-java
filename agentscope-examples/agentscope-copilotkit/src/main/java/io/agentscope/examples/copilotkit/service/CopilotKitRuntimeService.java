@@ -17,13 +17,17 @@ package io.agentscope.examples.copilotkit.service;
 
 import io.agentscope.core.agui.encoder.AguiEventEncoder;
 import io.agentscope.core.agui.event.AguiEvent;
+import io.agentscope.core.agui.model.AguiMessage;
 import io.agentscope.core.agui.model.RunAgentInput;
 import io.agentscope.core.agui.registry.AguiAgentRegistry;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.util.JsonUtils;
+import io.agentscope.examples.copilotkit.model.AgentMessage;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.AgentInfo;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.InfoResponse;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.Intelligence;
 import io.agentscope.examples.copilotkit.model.CopilotKitModels.ThreadEndpoints;
-import java.util.ArrayList;
+import io.agentscope.examples.copilotkit.repository.AgentMessageRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,12 +52,19 @@ public final class CopilotKitRuntimeService {
 
     private final AguiAgentRegistry aguiAgentRegistry;
     private final AgentEventAguiReplayer eventReplayer;
+    private final AgentEventToAguiMessageConverter eventToAguiMessageConverter;
     private final AguiEventEncoder encoder = new AguiEventEncoder();
+    private final AgentMessageRepository agentMessageRepository;
 
     public CopilotKitRuntimeService(
-            AguiAgentRegistry aguiAgentRegistry, AgentEventAguiReplayer eventReplayer) {
+            AguiAgentRegistry aguiAgentRegistry,
+            AgentEventAguiReplayer eventReplayer,
+            AgentEventToAguiMessageConverter eventToAguiMessageConverter,
+            AgentMessageRepository agentMessageRepository) {
         this.aguiAgentRegistry = aguiAgentRegistry;
         this.eventReplayer = eventReplayer;
+        this.eventToAguiMessageConverter = eventToAguiMessageConverter;
+        this.agentMessageRepository = agentMessageRepository;
     }
 
     public InfoResponse info() {
@@ -115,19 +126,22 @@ public final class CopilotKitRuntimeService {
     public Flux<ServerSentEvent<String>> connect(RunAgentInput input) {
         String threadId = input.getThreadId();
         String runId = input.getRunId();
-        List<AguiEvent> history = eventReplayer.replay(threadId, input);
-        if (history.isEmpty()) {
-            return Flux.fromIterable(emptyHandshake(threadId, runId)).map(this::sse);
-        }
-        return Flux.fromIterable(history).map(this::sse);
+        return Flux.fromIterable(emptyHandshake(threadId, runId)).map(this::sse);
     }
 
     private List<AguiEvent> emptyHandshake(String threadId, String runId) {
-        List<AguiEvent> events = new ArrayList<>(3);
-        events.add(new AguiEvent.RunStarted(threadId, runId));
-        events.add(new AguiEvent.MessagesSnapshot(threadId, runId, List.of()));
-        events.add(new AguiEvent.RunFinished(threadId, runId));
-        return events;
+        List<AgentEvent> history =
+                agentMessageRepository
+                        .queryAllByUserIdAndThreadIdOrderByCreateTimeAsc("user-001", threadId)
+                        .stream()
+                        .map(AgentMessage::getRawEvent)
+                        .map(json -> JsonUtils.getJsonCodec().fromJson(json, AgentEvent.class))
+                        .toList();
+        List<AguiMessage> messages = eventToAguiMessageConverter.convert(history);
+        return List.of(
+                new AguiEvent.RunStarted(threadId, runId),
+                new AguiEvent.MessagesSnapshot(threadId, runId, messages),
+                new AguiEvent.RunFinished(threadId, runId));
     }
 
     private ServerSentEvent<String> sse(AguiEvent event) {
